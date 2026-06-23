@@ -1,0 +1,347 @@
+const bank = window.QUESTION_BANK.questions;
+
+const state = {
+  autoShow: localStorage.getItem('autoShowAnswer') === '1',
+  mode: null,
+  order: [],
+  index: 0,
+  answers: {},
+  submitted: {},
+  timerId: null,
+  examEndsAt: null,
+};
+
+const view = document.getElementById('view');
+const timer = document.getElementById('timer');
+document.getElementById('homeBtn').addEventListener('click', showHome);
+
+function shuffle(arr) {
+  const copy = arr.slice();
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+function byType(type) {
+  return bank.filter(q => q.type === type).length;
+}
+
+function render(html) {
+  view.innerHTML = html;
+}
+
+function stopTimer() {
+  if (state.timerId) clearInterval(state.timerId);
+  state.timerId = null;
+  timer.hidden = true;
+}
+
+function showHome() {
+  stopTimer();
+  state.mode = null;
+  render(`
+    <section class="screen">
+      <div class="home-grid">
+        <div class="hero">
+          <h2>完整题库练习</h2>
+          <p>题库来自 Word 最终版，共 ${bank.length} 题。客观题自动判分，简答题和编程题提供参考答案自评。</p>
+          <div class="stats">
+            <div class="stat"><strong>${bank.length}</strong><span>总题数</span></div>
+            <div class="stat"><strong>${byType('blank') + byType('truefalse') + byType('choice')}</strong><span>客观题</span></div>
+            <div class="stat"><strong>${byType('short')}</strong><span>简答题</span></div>
+            <div class="stat"><strong>${byType('program')}</strong><span>编程/案例题</span></div>
+          </div>
+          <div class="mode-list">
+            <button class="mode-card" onclick="startPractice('ordered')">
+              <h3>顺序练习</h3>
+              <p>按 Word 中的原始顺序逐题练习，适合系统复习。</p>
+            </button>
+            <button class="mode-card" onclick="startPractice('random')">
+              <h3>乱序练习</h3>
+              <p>每次随机打乱全部题目，适合查漏补缺。</p>
+            </button>
+            <button class="mode-card" onclick="startExam()">
+              <h3>模拟考试</h3>
+              <p>60 分钟倒计时，提交后自动批改客观题并列出错题。</p>
+            </button>
+          </div>
+        </div>
+        <aside class="settings">
+          <div class="switch-row">
+            <div>
+              <h3>答题后自动显示答案</h3>
+              <p>打开后，练习模式每次作答后立即显示解析/参考答案；关闭时需要手动查看。</p>
+            </div>
+            <label class="switch">
+              <input id="autoSwitch" type="checkbox" ${state.autoShow ? 'checked' : ''}>
+              <span class="slider"></span>
+            </label>
+          </div>
+        </aside>
+      </div>
+    </section>
+  `);
+  document.getElementById('autoSwitch').addEventListener('change', e => {
+    state.autoShow = e.target.checked;
+    localStorage.setItem('autoShowAnswer', state.autoShow ? '1' : '0');
+  });
+}
+
+function startPractice(mode) {
+  stopTimer();
+  state.mode = mode;
+  state.order = mode === 'random' ? shuffle(bank.map((_, i) => i)) : bank.map((_, i) => i);
+  state.index = 0;
+  state.answers = {};
+  state.submitted = {};
+  showPracticeQuestion();
+}
+
+function currentQuestion() {
+  return bank[state.order[state.index]];
+}
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+
+function inputName(q) {
+  return `q_${q.id}`;
+}
+
+function renderAnswerInput(q, value = '') {
+  if (q.type === 'choice') {
+    const multi = (q.answers || []).length > 1;
+    return `<div class="options">${q.options.map(o => `
+      <label class="option">
+        <input type="${multi ? 'checkbox' : 'radio'}" name="${inputName(q)}" value="${o.key}" ${Array.isArray(value) && value.includes(o.key) ? 'checked' : ''}>
+        <strong>${o.key}.</strong><span>${esc(o.text)}</span>
+      </label>`).join('')}</div>`;
+  }
+  if (q.type === 'truefalse') {
+    return `<div class="options">
+      <label class="option"><input type="radio" name="${inputName(q)}" value="√" ${value === '√' ? 'checked' : ''}> √ 正确</label>
+      <label class="option"><input type="radio" name="${inputName(q)}" value="×" ${value === '×' ? 'checked' : ''}> × 错误</label>
+    </div>`;
+  }
+  if (q.type === 'blank') {
+    const count = Math.max((q.answers || []).length, (q.body.match(/_{2,}/g) || []).length, 1);
+    return `<div class="options">${Array.from({length: count}).map((_, i) => `
+      <input type="text" data-blank="${i}" placeholder="第 ${i + 1} 空" value="${esc((value || [])[i] || '')}">
+    `).join('')}</div>`;
+  }
+  return `<textarea placeholder="${q.type === 'program' ? '在这里写代码或思路' : '在这里作答'}">${esc(value || '')}</textarea>`;
+}
+
+function collectAnswer(q, root = document) {
+  if (q.type === 'choice') {
+    return [...root.querySelectorAll(`input[name="${inputName(q)}"]:checked`)].map(x => x.value).sort();
+  }
+  if (q.type === 'truefalse') {
+    const el = root.querySelector(`input[name="${inputName(q)}"]:checked`);
+    return el ? el.value : '';
+  }
+  if (q.type === 'blank') {
+    return [...root.querySelectorAll('[data-blank]')].map(x => x.value.trim());
+  }
+  const ta = root.querySelector('textarea');
+  return ta ? ta.value : '';
+}
+
+function normalize(s) {
+  return String(s ?? '').trim().replace(/\s+/g, '').replace(/（/g, '(').replace(/）/g, ')').toLowerCase();
+}
+
+function gradeQuestion(q, ans) {
+  if (q.type === 'choice') {
+    const expected = (q.answers || []).slice().sort();
+    if (!expected.length) return {gradable: true, correct: false, expected: '无正确选项'};
+    return {gradable: true, correct: JSON.stringify(ans || []) === JSON.stringify(expected), expected: expected.join('、')};
+  }
+  if (q.type === 'truefalse') {
+    return {gradable: true, correct: ans === q.answer, expected: q.answer};
+  }
+  if (q.type === 'blank') {
+    const expected = q.answers || [];
+    const correct = expected.every((e, i) => normalize((ans || [])[i]) === normalize(e));
+    return {gradable: true, correct, expected: expected.join('；')};
+  }
+  return {gradable: false, correct: null, expected: q.reference || '见参考答案'};
+}
+
+function answerBlock(q, ans) {
+  const g = gradeQuestion(q, ans);
+  const cls = !g.gradable ? '' : g.correct ? 'correct' : 'wrong';
+  const title = !g.gradable ? '参考答案' : g.correct ? '正确' : '需要再看';
+  const expected = q.type === 'short' || q.type === 'program' ? q.reference : g.expected;
+  return `<div class="feedback ${cls}">
+    <strong>${title}</strong>
+    ${q.note ? `<p>${esc(q.note)}</p>` : ''}
+    <div class="reference">${esc(expected || '无参考答案')}</div>
+  </div>`;
+}
+
+function showPracticeQuestion(forceAnswer = false) {
+  const q = currentQuestion();
+  const progress = ((state.index + 1) / state.order.length) * 100;
+  const saved = state.answers[q.id];
+  const submitted = state.submitted[q.id];
+  render(`
+    <section class="screen">
+      <div class="toolbar">
+        <span class="pill">${state.mode === 'random' ? '乱序练习' : '顺序练习'}</span>
+        <span class="pill">${state.index + 1} / ${state.order.length}</span>
+        <div class="progress"><span style="width:${progress}%"></span></div>
+      </div>
+      <article class="question-card" id="questionCard">
+        <div class="meta">
+          <span class="pill">${esc(q.section)}</span>
+          <span class="pill">${esc(q.category)}</span>
+          <span class="pill">${typeName(q.type)}</span>
+        </div>
+        <div class="question-body">${esc(q.number + '. ' + q.body)}</div>
+        ${q.options?.length ? '' : ''}
+        ${renderAnswerInput(q, saved)}
+        <div class="actions">
+          <button class="primary" onclick="submitPractice()">提交本题</button>
+          <button class="secondary" onclick="toggleAnswer()">查看答案</button>
+          <button class="secondary" onclick="prevQuestion()">上一题</button>
+          <button class="secondary" onclick="nextQuestion()">下一题</button>
+        </div>
+        <div id="answerSlot">${(forceAnswer || (submitted && state.autoShow)) ? answerBlock(q, saved) : ''}</div>
+      </article>
+    </section>
+  `);
+}
+
+function typeName(type) {
+  return {blank:'填空题', truefalse:'判断题', choice:'选择题', short:'简答题', program:'编程/案例题'}[type] || type;
+}
+
+function submitPractice() {
+  const q = currentQuestion();
+  const ans = collectAnswer(q);
+  state.answers[q.id] = ans;
+  state.submitted[q.id] = true;
+  if (state.autoShow) {
+    document.getElementById('answerSlot').innerHTML = answerBlock(q, ans);
+  }
+}
+
+function toggleAnswer() {
+  const q = currentQuestion();
+  const ans = collectAnswer(q);
+  state.answers[q.id] = ans;
+  document.getElementById('answerSlot').innerHTML = answerBlock(q, ans);
+}
+
+function prevQuestion() {
+  const q = currentQuestion();
+  state.answers[q.id] = collectAnswer(q);
+  state.index = Math.max(0, state.index - 1);
+  showPracticeQuestion();
+}
+
+function nextQuestion() {
+  const q = currentQuestion();
+  state.answers[q.id] = collectAnswer(q);
+  state.index = Math.min(state.order.length - 1, state.index + 1);
+  showPracticeQuestion();
+}
+
+function startExam() {
+  state.mode = 'exam';
+  state.order = bank.map((_, i) => i);
+  state.answers = {};
+  state.submitted = {};
+  state.examEndsAt = Date.now() + 60 * 60 * 1000;
+  timer.hidden = false;
+  state.timerId = setInterval(updateTimer, 250);
+  updateTimer();
+  renderExam();
+}
+
+function updateTimer() {
+  const left = Math.max(0, state.examEndsAt - Date.now());
+  const m = Math.floor(left / 60000);
+  const s = Math.floor((left % 60000) / 1000);
+  timer.textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  if (left <= 0) {
+    submitExam();
+  }
+}
+
+function renderExam() {
+  render(`
+    <section class="screen">
+      <div class="toolbar">
+        <span class="pill">模拟考试</span>
+        <span class="pill">60分钟</span>
+        <span class="pill">共 ${bank.length} 题</span>
+      </div>
+      <div class="exam-list">
+        ${bank.map((q, i) => `
+          <article class="exam-question" data-exam-id="${q.id}">
+            <div class="meta"><span class="pill">${i + 1}</span><span class="pill">${esc(q.section)}</span><span class="pill">${typeName(q.type)}</span></div>
+            <div class="question-body">${esc(q.body)}</div>
+            ${renderAnswerInput(q)}
+          </article>
+        `).join('')}
+      </div>
+      <div class="actions">
+        <button class="primary" onclick="submitExam()">提交试卷</button>
+        <button class="danger" onclick="showHome()">退出考试</button>
+      </div>
+    </section>
+  `);
+}
+
+function collectExamAnswers() {
+  const answers = {};
+  for (const q of bank) {
+    const root = document.querySelector(`[data-exam-id="${q.id}"]`);
+    answers[q.id] = root ? collectAnswer(q, root) : undefined;
+  }
+  return answers;
+}
+
+function submitExam() {
+  if (state.mode !== 'exam') return;
+  stopTimer();
+  const answers = collectExamAnswers();
+  const gradable = bank.filter(q => gradeQuestion(q, answers[q.id]).gradable);
+  const correct = gradable.filter(q => gradeQuestion(q, answers[q.id]).correct);
+  const manual = bank.length - gradable.length;
+  const score = gradable.length ? Math.round((correct.length / gradable.length) * 100) : 0;
+  const wrong = gradable.filter(q => !gradeQuestion(q, answers[q.id]).correct);
+
+  render(`
+    <section class="screen">
+      <h2>考试结果</h2>
+      <div class="result-grid">
+        <div class="stat"><strong>${score}</strong><span>客观题得分</span></div>
+        <div class="stat"><strong>${correct.length}/${gradable.length}</strong><span>客观题正确</span></div>
+        <div class="stat"><strong>${manual}</strong><span>简答/编程待自评</span></div>
+      </div>
+      <h3>错题</h3>
+      <div class="wrong-list">
+        ${wrong.length ? wrong.map(q => {
+          const g = gradeQuestion(q, answers[q.id]);
+          return `<article class="exam-question">
+            <div class="meta"><span class="pill">${esc(q.section)}</span><span class="pill">${typeName(q.type)}</span></div>
+            <div class="question-body">${esc(q.number + '. ' + q.body)}</div>
+            <p><strong>你的答案：</strong>${esc(Array.isArray(answers[q.id]) ? answers[q.id].join('、') : answers[q.id] || '未作答')}</p>
+            <p><strong>正确答案：</strong>${esc(g.expected)}</p>
+          </article>`;
+        }).join('') : '<p>客观题没有错题。</p>'}
+      </div>
+      <h3>待自评题</h3>
+      <p>简答题和编程题不自动判分。你可以回到练习模式逐题查看参考答案。</p>
+      <div class="actions"><button class="primary" onclick="showHome()">返回主页</button></div>
+    </section>
+  `);
+}
+
+showHome();
