@@ -273,17 +273,56 @@ function updateTimer() {
   }
 }
 
+function openQuestionList() {
+  if (state.mode !== 'exam') return;
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.id = 'questionListModal';
+  modal.innerHTML = `
+    <div class="question-modal" role="dialog" aria-modal="true" aria-label="题目列表">
+      <header>
+        <div>
+          <h3>题目列表</h3>
+          <p style="margin:4px 0 0;color:var(--muted);font-size:13px;">点击题号跳到对应题目</p>
+        </div>
+        <button class="icon-btn" onclick="closeQuestionList()" title="关闭">×</button>
+      </header>
+      <div class="question-grid">
+        ${bank.map((q, i) => `<button class="question-jump" onclick="jumpToExamQuestion(${i})">${i + 1}</button>`).join('')}
+      </div>
+    </div>
+  `;
+  modal.addEventListener('click', event => {
+    if (event.target === modal) closeQuestionList();
+  });
+  document.body.appendChild(modal);
+}
+
+function closeQuestionList() {
+  const modal = document.getElementById('questionListModal');
+  if (modal) modal.remove();
+}
+
+function jumpToExamQuestion(index) {
+  closeQuestionList();
+  const target = document.querySelector(`[data-exam-index="${index}"]`);
+  if (!target) return;
+  target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  target.classList.add('jump-highlight');
+  setTimeout(() => target.classList.remove('jump-highlight'), 1400);
+}
+
 function renderExam() {
   render(`
     <section class="screen">
       <div class="toolbar">
         <span class="pill">模拟考试</span>
         <span class="pill">60分钟</span>
-        <span class="pill">共 ${bank.length} 题</span>
+        <button class="pill question-list-btn" onclick="openQuestionList()">共 ${bank.length} 题</button>
       </div>
       <div class="exam-list">
         ${bank.map((q, i) => `
-          <article class="exam-question" data-exam-id="${q.id}">
+          <article class="exam-question" data-exam-id="${q.id}" data-exam-index="${i}">
             <div class="meta"><span class="pill">${i + 1}</span><span class="pill">${esc(q.section)}</span><span class="pill">${typeName(q.type)}</span></div>
             <div class="question-body">${esc(q.body)}</div>
             ${renderAnswerInput(q)}
