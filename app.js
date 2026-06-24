@@ -1,4 +1,8 @@
 const bank = window.QUESTION_BANK.questions;
+const EXAM_TOTAL = 60;
+const EXAM_SHORT_COUNT = 5;
+const EXAM_PROGRAM_COUNT = 4;
+const EXAM_OBJECTIVE_COUNT = EXAM_TOTAL - EXAM_SHORT_COUNT - EXAM_PROGRAM_COUNT;
 
 const state = {
   autoShow: localStorage.getItem('autoShowAnswer') === '1',
@@ -22,6 +26,32 @@ function shuffle(arr) {
     [copy[i], copy[j]] = [copy[j], copy[i]];
   }
   return copy;
+}
+
+function questionIndexesByType(type) {
+  return bank.map((q, i) => q.type === type ? i : -1).filter(i => i >= 0);
+}
+
+function objectiveQuestionIndexes() {
+  return bank.map((q, i) => ['blank', 'truefalse', 'choice'].includes(q.type) ? i : -1).filter(i => i >= 0);
+}
+
+function takeRandom(indexes, count, label) {
+  if (indexes.length < count) {
+    throw new Error(`${label}数量不足，无法抽取 ${count} 道。`);
+  }
+  return shuffle(indexes).slice(0, count);
+}
+
+function buildExamOrder() {
+  const short = takeRandom(questionIndexesByType('short'), EXAM_SHORT_COUNT, '简答题');
+  const program = takeRandom(questionIndexesByType('program'), EXAM_PROGRAM_COUNT, '编程题');
+  const objective = takeRandom(objectiveQuestionIndexes(), EXAM_OBJECTIVE_COUNT, '客观题');
+  return shuffle([...objective, ...short, ...program]);
+}
+
+function examQuestions() {
+  return state.order.map(i => bank[i]);
 }
 
 function byType(type) {
@@ -64,7 +94,7 @@ function showHome() {
             </button>
             <button class="mode-card" onclick="startExam()">
               <h3>模拟考试</h3>
-              <p>60 分钟倒计时，提交后自动批改客观题并列出错题。</p>
+              <p>随机抽 60 题：5 道简答、4 道编程，其余为客观题。60 分钟倒计时，提交后批改并列出错题。</p>
             </button>
           </div>
         </div>
@@ -253,7 +283,7 @@ function nextQuestion() {
 
 function startExam() {
   state.mode = 'exam';
-  state.order = bank.map((_, i) => i);
+  state.order = buildExamOrder();
   state.answers = {};
   state.submitted = {};
   state.examEndsAt = Date.now() + 60 * 60 * 1000;
@@ -275,6 +305,7 @@ function updateTimer() {
 
 function openQuestionList() {
   if (state.mode !== 'exam') return;
+  const questions = examQuestions();
   const modal = document.createElement('div');
   modal.className = 'modal-backdrop';
   modal.id = 'questionListModal';
@@ -288,7 +319,7 @@ function openQuestionList() {
         <button class="icon-btn" onclick="closeQuestionList()" title="关闭">×</button>
       </header>
       <div class="question-grid">
-        ${bank.map((q, i) => `<button class="question-jump" onclick="jumpToExamQuestion(${i})">${i + 1}</button>`).join('')}
+        ${questions.map((q, i) => `<button class="question-jump" onclick="jumpToExamQuestion(${i})">${i + 1}</button>`).join('')}
       </div>
     </div>
   `;
@@ -313,15 +344,18 @@ function jumpToExamQuestion(index) {
 }
 
 function renderExam() {
+  const questions = examQuestions();
   render(`
     <section class="screen">
       <div class="toolbar">
         <span class="pill">模拟考试</span>
+        <span class="pill">随机 ${questions.length} 题</span>
+        <span class="pill">5 简答 · 4 编程 · ${EXAM_OBJECTIVE_COUNT} 客观</span>
         <span class="pill">60分钟</span>
-        <button class="pill question-list-btn" onclick="openQuestionList()">共 ${bank.length} 题</button>
+        <button class="pill question-list-btn" onclick="openQuestionList()">共 ${questions.length} 题</button>
       </div>
       <div class="exam-list">
-        ${bank.map((q, i) => `
+        ${questions.map((q, i) => `
           <article class="exam-question" data-exam-id="${q.id}" data-exam-index="${i}">
             <div class="meta"><span class="pill">${i + 1}</span><span class="pill">${esc(q.section)}</span><span class="pill">${typeName(q.type)}</span></div>
             <div class="question-body">${esc(q.body)}</div>
@@ -339,7 +373,7 @@ function renderExam() {
 
 function collectExamAnswers() {
   const answers = {};
-  for (const q of bank) {
+  for (const q of examQuestions()) {
     const root = document.querySelector(`[data-exam-id="${q.id}"]`);
     answers[q.id] = root ? collectAnswer(q, root) : undefined;
   }
@@ -350,9 +384,10 @@ function submitExam() {
   if (state.mode !== 'exam') return;
   stopTimer();
   const answers = collectExamAnswers();
-  const gradable = bank.filter(q => gradeQuestion(q, answers[q.id]).gradable);
+  const questions = examQuestions();
+  const gradable = questions.filter(q => gradeQuestion(q, answers[q.id]).gradable);
   const correct = gradable.filter(q => gradeQuestion(q, answers[q.id]).correct);
-  const manual = bank.length - gradable.length;
+  const manual = questions.length - gradable.length;
   const score = gradable.length ? Math.round((correct.length / gradable.length) * 100) : 0;
   const wrong = gradable.filter(q => !gradeQuestion(q, answers[q.id]).correct);
 
