@@ -143,6 +143,15 @@ body {
   gap: 12px;
 }
 
+.section-label {
+  margin: 20px 0 10px;
+  font-size: 17px;
+}
+
+.category-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .mode-card {
   text-align: left;
   border: 1px solid var(--line);
@@ -515,5 +524,8 @@ pre {
   }
   .question-grid {
     grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
+  }
+  .category-list {
+    grid-template-columns: 1fr;
   }
 }
