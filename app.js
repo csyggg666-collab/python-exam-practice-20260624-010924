@@ -7,6 +7,7 @@ const EXAM_OBJECTIVE_COUNT = EXAM_TOTAL - EXAM_SHORT_COUNT - EXAM_PROGRAM_COUNT;
 const state = {
   autoShow: localStorage.getItem('autoShowAnswer') === '1',
   mode: null,
+  practiceFilter: 'all',
   order: [],
   index: 0,
   answers: {},
@@ -34,6 +35,30 @@ function questionIndexesByType(type) {
 
 function objectiveQuestionIndexes() {
   return bank.map((q, i) => ['blank', 'truefalse', 'choice'].includes(q.type) ? i : -1).filter(i => i >= 0);
+}
+
+function allQuestionIndexes() {
+  return bank.map((_, i) => i);
+}
+
+function practiceIndexes(filter) {
+  if (filter === 'objective') return objectiveQuestionIndexes();
+  if (filter === 'short') return questionIndexesByType('short');
+  if (filter === 'program') return questionIndexesByType('program');
+  return allQuestionIndexes();
+}
+
+function practiceFilterTitle(filter) {
+  return {
+    all: '全部题',
+    objective: '客观题',
+    short: '简答题',
+    program: '编程题'
+  }[filter] || '全部题';
+}
+
+function countInIndexes(indexes, type) {
+  return indexes.filter(i => bank[i].type === type).length;
 }
 
 function takeRandom(indexes, count, label) {
@@ -84,17 +109,36 @@ function showHome() {
             <div class="stat"><strong>${byType('program')}</strong><span>编程/案例题</span></div>
           </div>
           <div class="mode-list">
-            <button class="mode-card" onclick="startPractice('ordered')">
+            <button class="mode-card" onclick="startPractice('ordered', 'all')">
               <h3>顺序练习</h3>
               <p>按 Word 中的原始顺序逐题练习，适合系统复习。</p>
             </button>
-            <button class="mode-card" onclick="startPractice('random')">
+            <button class="mode-card" onclick="startPractice('random', 'all')">
               <h3>乱序练习</h3>
               <p>每次随机打乱全部题目，适合查漏补缺。</p>
             </button>
             <button class="mode-card" onclick="startExam()">
               <h3>模拟考试</h3>
               <p>随机抽 60 题：5 道简答、4 道编程，其余为客观题。60 分钟倒计时，提交后批改并列出错题。</p>
+            </button>
+          </div>
+          <h3 class="section-label">分类窗口</h3>
+          <div class="mode-list category-list">
+            <button class="mode-card" onclick="showPracticeWindow('all')">
+              <h3>全部题</h3>
+              <p>${bank.length} 题，包含客观题、简答题和编程题。</p>
+            </button>
+            <button class="mode-card" onclick="showPracticeWindow('objective')">
+              <h3>客观题</h3>
+              <p>${practiceIndexes('objective').length} 题，包含填空、判断和选择。</p>
+            </button>
+            <button class="mode-card" onclick="showPracticeWindow('short')">
+              <h3>简答题</h3>
+              <p>${practiceIndexes('short').length} 题，只练简答。</p>
+            </button>
+            <button class="mode-card" onclick="showPracticeWindow('program')">
+              <h3>编程题</h3>
+              <p>${practiceIndexes('program').length} 题，包含编程和案例题。</p>
             </button>
           </div>
         </div>
@@ -119,10 +163,51 @@ function showHome() {
   });
 }
 
-function startPractice(mode) {
+function showPracticeWindow(filter) {
+  stopTimer();
+  state.mode = 'window';
+  state.practiceFilter = filter;
+  const indexes = practiceIndexes(filter);
+  const objective = indexes.filter(i => ['blank', 'truefalse', 'choice'].includes(bank[i].type)).length;
+  const short = countInIndexes(indexes, 'short');
+  const program = countInIndexes(indexes, 'program');
+  render(`
+    <section class="screen">
+      <div class="toolbar">
+        <span class="pill">${practiceFilterTitle(filter)}</span>
+        <span class="pill">共 ${indexes.length} 题</span>
+      </div>
+      <article class="question-card">
+        <div class="meta">
+          <span class="pill">客观题 ${objective}</span>
+          <span class="pill">简答题 ${short}</span>
+          <span class="pill">编程题 ${program}</span>
+        </div>
+        <div class="question-body">${practiceFilterTitle(filter)}练习</div>
+        <div class="mode-list">
+          <button class="mode-card" onclick="startPractice('ordered', '${filter}')">
+            <h3>顺序练习</h3>
+            <p>按原文档顺序练这一类题。</p>
+          </button>
+          <button class="mode-card" onclick="startPractice('random', '${filter}')">
+            <h3>乱序练习</h3>
+            <p>每次进入随机打乱这一类题。</p>
+          </button>
+        </div>
+        <div class="actions">
+          <button class="secondary" onclick="showHome()">返回主页</button>
+        </div>
+      </article>
+    </section>
+  `);
+}
+
+function startPractice(mode, filter = 'all') {
   stopTimer();
   state.mode = mode;
-  state.order = mode === 'random' ? shuffle(bank.map((_, i) => i)) : bank.map((_, i) => i);
+  state.practiceFilter = filter;
+  const indexes = practiceIndexes(filter);
+  state.order = mode === 'random' ? shuffle(indexes) : indexes;
   state.index = 0;
   state.answers = {};
   state.submitted = {};
@@ -221,6 +306,7 @@ function showPracticeQuestion(forceAnswer = false) {
   render(`
     <section class="screen">
       <div class="toolbar">
+        <span class="pill">${practiceFilterTitle(state.practiceFilter)}</span>
         <span class="pill">${state.mode === 'random' ? '乱序练习' : '顺序练习'}</span>
         <span class="pill">${state.index + 1} / ${state.order.length}</span>
         <div class="progress"><span style="width:${progress}%"></span></div>
